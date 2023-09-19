@@ -188,7 +188,10 @@ static gboolean rtm_connect_cb(SlackAccount *sa, gpointer data, json_value *json
 
 	slack_login_step(sa);
 	purple_debug_info("slack", "RTM URL: %s\n", url);
-	sa->rtm = purple_websocket_connect(sa->account, url, NULL, rtm_cb, sa);
+	gchar *cookie = g_strdup_printf("d=%s", sa->d_cookie);
+	const char *cookies[] = { cookie , NULL };
+	sa->rtm = purple_websocket_connect(sa->account, url, NULL, cookies, rtm_cb, sa);
+	g_free(cookie);
 
 	sa->ping_timer = purple_timeout_add_seconds(60, ping_timer, sa);
 	return FALSE;
