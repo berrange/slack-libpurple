@@ -183,6 +183,44 @@ static void slack_conversation_updated(PurpleConversation *conv, PurpleConvUpdat
 	slack_mark_conversation(sa, conv);
 }
 
+static char *slack_run_auth_script(PurpleAccount *account) {
+	const char *auth_script = purple_account_get_string(account, "auth_script", NULL);
+	const char *username = purple_account_get_username(account);
+	GError *err = NULL;
+	gchar **argv = NULL;
+	gchar *output = NULL;
+	int argc = 0;
+
+	if (!g_shell_parse_argv(auth_script, &argc, &argv, &err)) {
+		purple_debug_warning("slack", "Error parsing auth script %s: %s\n", auth_script, err->message);
+		g_error_free(err);
+		return NULL;
+	}
+
+	argv = g_renew(char *, argv, argc + 2);
+	argv[argc] = (char *)username;
+	argv[argc+1] = NULL;
+
+	if (!auth_script || !*auth_script) {
+		purple_debug_misc("slack", "Auth script not configured\n");
+		return NULL;
+	}
+
+	purple_debug_misc("slack", "Running auth script '%s' with user '%s'\n", auth_script, username);
+	if (!g_spawn_sync(NULL,argv, NULL,
+			  G_SPAWN_DEFAULT | G_SPAWN_SEARCH_PATH,
+			  NULL, NULL,
+			  &output, NULL, NULL, &err)) {
+		purple_debug_warning("slack", "Error runing auth script %s: %s\n", auth_script, err->message);
+		g_error_free(err);
+		g_free(output);
+		return NULL;
+	}
+
+	purple_debug_info("slack", "Auth script returned data\n");
+	return g_strchomp(output);
+}
+
 static void slack_login(PurpleAccount *account) {
 	PurpleConnection *gc = purple_account_get_connection(account);
 	gboolean legacy_token = FALSE;
@@ -280,7 +318,11 @@ static void slack_login(PurpleAccount *account) {
 	purple_connection_set_state(gc, PURPLE_CONNECTING);
 
 	/* check if a token has been stored in the password field. */
-	const char *password = purple_account_get_password(sa->account);
+	const char *password = slack_run_auth_script(sa->account);
+	if (password == NULL) {
+		password = purple_account_get_password(sa->account);
+	}
+
 	if(g_regex_match_simple("^xox.-.+", password, 0, 0)) {
 		/* The password is a token. There might be one or two tokens
 		   depending on whether we are using the cookie token or not. */
@@ -566,6 +608,9 @@ static void init_plugin(G_GNUC_UNUSED PurplePlugin *plugin)
 
 	prpl_info.protocol_options = g_list_append(prpl_info.protocol_options,
 		purple_account_option_string_new("API token", "api_token", ""));
+
+	prpl_info.protocol_options = g_list_append(prpl_info.protocol_options,
+		purple_account_option_string_new("Auth script", "auth_script", ""));
 
 	prpl_info.protocol_options = g_list_append(prpl_info.protocol_options,
 		purple_account_option_bool_new("Open chat on channel message", "open_chat", FALSE));
